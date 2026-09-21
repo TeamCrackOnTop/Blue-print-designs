@@ -1,0 +1,8 @@
+# Keep secrets and local runtime files out of Git
+.env
+.venv/
+__pycache__/
+*.pyc
+
+# Local bot data
+data/settings.json
