@@ -13,6 +13,9 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 DATA_FILE = Path("data/settings.json")
 DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
 
+PREFIX = "!"
+VALID_SETTINGS = {"transcript_channel", "log_channel"}
+
 
 def load_settings() -> dict:
     if not DATA_FILE.exists():
@@ -34,7 +37,8 @@ class BlueprintBot(commands.Bot):
     def __init__(self) -> None:
         intents = discord.Intents.default()
         intents.members = True
-        super().__init__(command_prefix="!", intents=intents)
+        intents.message_content = True
+        super().__init__(command_prefix=PREFIX, intents=intents, help_command=None)
 
     async def setup_hook(self) -> None:
         await self.tree.sync()
@@ -65,7 +69,7 @@ class SetupView(discord.ui.View):
 
     @discord.ui.button(label="General Settings", style=discord.ButtonStyle.primary, row=0)
     async def general(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await self.show_panel(interaction, "General Settings", "Use `/config set <key> <value>` to update a setting.")
+        await self.show_panel(interaction, "General Settings", "Use `/config set <key> <value>` or `!config <key> <value>` to update a setting.")
 
     @discord.ui.button(label="Categories", style=discord.ButtonStyle.primary, row=0)
     async def categories(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -163,6 +167,54 @@ async def config(interaction: discord.Interaction, key: app_commands.Choice[str]
 @bot.tree.command(name="ping", description="Check whether the bot is online")
 async def ping(interaction: discord.Interaction) -> None:
     await interaction.response.send_message(f"Pong! `{round(bot.latency * 1000)}ms`", ephemeral=True)
+
+
+@bot.command(name="setup")
+@commands.has_guild_permissions(manage_guild=True)
+async def prefix_setup(ctx: commands.Context) -> None:
+    await ctx.send(embed=dashboard_embed(ctx.guild), view=SetupView())
+
+
+@bot.command(name="config")
+@commands.has_guild_permissions(manage_guild=True)
+async def prefix_config(ctx: commands.Context, key: str, *, value: str) -> None:
+    key = key.lower()
+    if key not in VALID_SETTINGS:
+        await ctx.send(f"Invalid setting. Choose one of: {', '.join(sorted(VALID_SETTINGS))}", delete_after=10)
+        return
+    settings.setdefault(str(ctx.guild.id), {})[key] = value
+    save_settings(settings)
+    await ctx.send(f"Saved `{key}` as `{value}`.")
+
+
+@bot.command(name="ping")
+async def prefix_ping(ctx: commands.Context) -> None:
+    await ctx.send(f"Pong! `{round(bot.latency * 1000)}ms`")
+
+
+@bot.command(name="help")
+async def prefix_help(ctx: commands.Context) -> None:
+    await ctx.send(
+        "**Blueprint Designs commands**\n"
+        "`!setup` — open the setup dashboard (Manage Server required)\n"
+        "`!config <transcript_channel|log_channel> <value>` — save a setting (Manage Server required)\n"
+        "`!ping` — check bot latency\n\n"
+        "The same commands are also available as slash commands: `/setup`, `/config`, and `/ping`."
+    )
+
+
+@bot.event
+async def on_command_error(ctx: commands.Context, error: commands.CommandError) -> None:
+    if isinstance(error, commands.CommandNotFound):
+        return
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send("You need the **Manage Server** permission to use that command.", delete_after=10)
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send(f"Missing argument `{error.param.name}`. Use `!help` for usage.", delete_after=10)
+    elif isinstance(error, commands.NoPrivateMessage):
+        await ctx.send("This command can only be used in a server.", delete_after=10)
+    else:
+        raise error
 
 
 @bot.tree.error
